@@ -13,7 +13,7 @@ import androidx.room.RoomDatabase
         EqPresetEntity::class,
         ScanFolderEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class SonicFlowDatabase : RoomDatabase() {
@@ -29,7 +29,10 @@ abstract class SonicFlowDatabase : RoomDatabase() {
                     context.applicationContext,
                     SonicFlowDatabase::class.java,
                     "sonicflow.db"
-                ).build().also { INSTANCE = it }
+                )
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .build()
+                    .also { INSTANCE = it }
             }
         }
     }

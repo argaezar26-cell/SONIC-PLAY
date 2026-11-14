@@ -32,7 +32,8 @@ data class ParsedAudioFile(
     val channels: Int,
     val replayGainTrackDb: Float?,
     val replayGainAlbumDb: Float?,
-    val artworkCachePath: String?
+    val artworkCachePath: String?,
+    val lyrics: String? = null
 )
 
 class AudioMetadataExtractor(private val context: Context) {
@@ -134,9 +135,10 @@ class AudioMetadataExtractor(private val context: Context) {
             runCatching { extractor.release() }
         }
 
-        // Direct binary header probe for exact FLAC/WAV bit depth, sample rate, and ReplayGain tags
+        // Direct binary header probe for exact FLAC/WAV bit depth, sample rate, ReplayGain, and Lyrics tags
         var rgTrack: Float? = null
         var rgAlbum: Float? = null
+        var lyrics: String? = null
         try {
             context.contentResolver.openInputStream(uri)?.use { stream ->
                 val header = parseBinaryHeader(stream, ext, mimeType)
@@ -147,6 +149,7 @@ class AudioMetadataExtractor(private val context: Context) {
                     if (header.durationMs > 0L && durationMs == 0L) durationMs = header.durationMs
                     rgTrack = header.replayGainTrackDb
                     rgAlbum = header.replayGainAlbumDb
+                    lyrics = header.lyrics
                 }
             }
         } catch (_: Exception) {
@@ -176,7 +179,8 @@ class AudioMetadataExtractor(private val context: Context) {
             channels = channels,
             replayGainTrackDb = rgTrack,
             replayGainAlbumDb = rgAlbum,
-            artworkCachePath = artworkPath
+            artworkCachePath = artworkPath,
+            lyrics = lyrics
         )
     }
 
@@ -186,7 +190,8 @@ class AudioMetadataExtractor(private val context: Context) {
         val channels: Int = 0,
         val durationMs: Long = 0L,
         val replayGainTrackDb: Float? = null,
-        val replayGainAlbumDb: Float? = null
+        val replayGainAlbumDb: Float? = null,
+        val lyrics: String? = null
     )
 
     private fun parseBinaryHeader(stream: InputStream, ext: String, mimeType: String): BinaryHeaderInfo? {
@@ -202,6 +207,7 @@ class AudioMetadataExtractor(private val context: Context) {
             var durMs = 0L
             var rgTrack: Float? = null
             var rgAlbum: Float? = null
+            var lyrics: String? = null
 
             var isLast = false
             var blockLimit = 0
@@ -248,11 +254,14 @@ class AudioMetadataExtractor(private val context: Context) {
                     val comments = parseVorbisComments(data)
                     rgTrack = comments["REPLAYGAIN_TRACK_GAIN"]?.let(::parseGainDb)
                     rgAlbum = comments["REPLAYGAIN_ALBUM_GAIN"]?.let(::parseGainDb)
+                    lyrics = comments["LYRICS"]
+                        ?: comments["UNSYNCEDLYRICS"]
+                        ?: comments["SYNCEDLYRICS"]
                 } else {
                     skipBytes(stream, length.toLong())
                 }
             }
-            return BinaryHeaderInfo(sr, bps, ch, durMs, rgTrack, rgAlbum)
+            return BinaryHeaderInfo(sr, bps, ch, durMs, rgTrack, rgAlbum, lyrics)
         }
 
         if (magicStr == "RIFF" || ext == "wav" || mimeType.contains("wav")) {

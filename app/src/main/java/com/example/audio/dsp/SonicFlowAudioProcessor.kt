@@ -52,6 +52,9 @@ class SonicFlowAudioProcessor : BaseAudioProcessor() {
     private var visualizerEnabled: Boolean = true
 
     @Volatile
+    private var playbackActive: Boolean = false
+
+    @Volatile
     private var configDirty: Boolean = true
 
     private var activeSampleRate = 48000
@@ -109,6 +112,13 @@ class SonicFlowAudioProcessor : BaseAudioProcessor() {
         visualizerEnabled = enabled
         if (!enabled) {
             _visualizerFrame.value = VisualizerFrame(isActive = false)
+        }
+    }
+
+    fun setPlaybackActive(active: Boolean) {
+        playbackActive = active
+        if (!active) {
+            _visualizerFrame.value = _visualizerFrame.value.copy(isActive = false)
         }
     }
 
@@ -179,8 +189,10 @@ class SonicFlowAudioProcessor : BaseAudioProcessor() {
 
         val outputBuffer = replaceOutputBuffer(remaining)
 
-        // Fast bit-identical copy if bit-transparent or DSP bypassed and visualizer disabled
-        if (!dspActive && !visualizerEnabled) {
+        val runVisualizer = visualizerEnabled && playbackActive
+
+        // Fast bit-identical copy if bit-transparent or DSP bypassed and visualizer disabled/paused
+        if (!dspActive && !runVisualizer) {
             outputBuffer.put(inputBuffer)
             outputBuffer.flip()
             _telemetry.value = DspTelemetry(isDspActuallyActive = false)
@@ -250,7 +262,7 @@ class SonicFlowAudioProcessor : BaseAudioProcessor() {
                 val mono = monoSum / activeChannelCount
                 peakHoldL = max(peakHoldL, abs(mono))
                 peakHoldR = max(peakHoldR, abs(mono))
-                if (visualizerEnabled) {
+                if (runVisualizer) {
                     pushVisualizerSample(mono.toFloat())
                 }
             } else {
@@ -324,7 +336,7 @@ class SonicFlowAudioProcessor : BaseAudioProcessor() {
                     writeDoubleSample(outputBuffer, s.coerceIn(-1.0, 1.0), activeEncoding)
                 }
 
-                if (visualizerEnabled) {
+                if (runVisualizer) {
                     val mono = if (activeChannelCount >= 2) {
                         ((frameSamples[0] + frameSamples[1]) * 0.5).toFloat()
                     } else {

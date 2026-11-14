@@ -155,6 +155,7 @@ class MusicLibraryRepository(
             ?: "Music Folder"
 
         val foundTracks = mutableListOf<TrackEntity>()
+        val seenUris = HashSet<String>()
         val existingByUri = dao.getAllTracksSnapshot().associateBy { it.uri }
 
         try {
@@ -174,6 +175,10 @@ class MusicLibraryRepository(
                     DocumentsContract.Document.COLUMN_SIZE
                 )
 
+                val audioCandidates = mutableListOf<Triple<String, String, Long>>()
+                val audioMimeMap = mutableMapOf<String, String>()
+                val lrcByBaseName = mutableMapOf<String, Uri>()
+
                 context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
                     val idIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                     val nameIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
@@ -192,52 +197,74 @@ class MusicLibraryRepository(
                         }
 
                         val ext = name.substringAfterLast('.', "").lowercase()
-                        val isAudio = mime.startsWith("audio/") || ext in supportedExtensions
-                        if (!isAudio) continue
-
-                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                        val docUriStr = docUri.toString()
-                        _scanProgress.value = _scanProgress.value.copy(
-                            scannedCount = foundTracks.size,
-                            currentFile = name
-                        )
-
-                        val existing = existingByUri[docUriStr]
-                        if (existing != null && existing.fileSizeBytes == size && existing.sampleRateHz > 0) {
-                            foundTracks.add(existing)
-                        } else {
-                            val parsed = extractor.extract(docUri, name, mime, size)
-                            foundTracks.add(
-                                TrackEntity(
-                                    id = existing?.id ?: 0L,
-                                    uri = docUriStr,
-                                    title = parsed.title,
-                                    artist = parsed.artist,
-                                    album = parsed.album,
-                                    albumArtist = parsed.albumArtist,
-                                    genre = parsed.genre,
-                                    year = parsed.year,
-                                    trackNumber = parsed.trackNumber,
-                                    durationMs = parsed.durationMs,
-                                    fileSizeBytes = parsed.fileSizeBytes,
-                                    mimeType = parsed.mimeType,
-                                    codec = parsed.codec,
-                                    sampleRateHz = parsed.sampleRateHz,
-                                    bitDepth = parsed.bitDepth,
-                                    bitrateKbps = parsed.bitrateKbps,
-                                    channels = parsed.channels,
-                                    folderUri = folderKey,
-                                    folderName = folderLabel,
-                                    dateAdded = existing?.dateAdded ?: System.currentTimeMillis(),
-                                    lastPlayedAt = existing?.lastPlayedAt ?: 0L,
-                                    playCount = existing?.playCount ?: 0,
-                                    isFavorite = existing?.isFavorite ?: false,
-                                    replayGainTrackDb = parsed.replayGainTrackDb,
-                                    replayGainAlbumDb = parsed.replayGainAlbumDb,
-                                    artworkCachePath = parsed.artworkCachePath
-                                )
-                            )
+                        if (ext == "lrc" && size in 1..65536) {
+                            val base = name.substringBeforeLast('.').lowercase()
+                            lrcByBaseName[base] = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                            continue
                         }
+
+                        val isAudio = mime.startsWith("audio/") || ext in supportedExtensions
+                        if (isAudio) {
+                            audioCandidates.add(Triple(docId, name, size))
+                            audioMimeMap[docId] = mime
+                        }
+                    }
+                }
+
+                for ((docId, name, size) in audioCandidates) {
+                    val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                    val docUriStr = docUri.toString()
+                    if (!seenUris.add(docUriStr)) continue
+
+                    _scanProgress.value = _scanProgress.value.copy(
+                        scannedCount = foundTracks.size,
+                        currentFile = name
+                    )
+
+                    val baseName = name.substringBeforeLast('.').lowercase()
+                    val sidecarLrc = lrcByBaseName[baseName]?.let { readSmallTextUri(it) }
+                    val existing = existingByUri[docUriStr]
+
+                    if (existing != null && existing.fileSizeBytes == size && existing.sampleRateHz > 0) {
+                        val updatedExisting = if (existing.lyrics.isNullOrBlank() && !sidecarLrc.isNullOrBlank()) {
+                            existing.copy(lyrics = sidecarLrc)
+                        } else {
+                            existing
+                        }
+                        foundTracks.add(updatedExisting)
+                    } else {
+                        val parsed = extractor.extract(docUri, name, audioMimeMap[docId].orEmpty(), size)
+                        foundTracks.add(
+                            TrackEntity(
+                                id = existing?.id ?: 0L,
+                                uri = docUriStr,
+                                title = parsed.title,
+                                artist = parsed.artist,
+                                album = parsed.album,
+                                albumArtist = parsed.albumArtist,
+                                genre = parsed.genre,
+                                year = parsed.year,
+                                trackNumber = parsed.trackNumber,
+                                durationMs = parsed.durationMs,
+                                fileSizeBytes = parsed.fileSizeBytes,
+                                mimeType = parsed.mimeType,
+                                codec = parsed.codec,
+                                sampleRateHz = parsed.sampleRateHz,
+                                bitDepth = parsed.bitDepth,
+                                bitrateKbps = parsed.bitrateKbps,
+                                channels = parsed.channels,
+                                folderUri = folderKey,
+                                folderName = folderLabel,
+                                dateAdded = existing?.dateAdded ?: System.currentTimeMillis(),
+                                lastPlayedAt = existing?.lastPlayedAt ?: 0L,
+                                playCount = existing?.playCount ?: 0,
+                                isFavorite = existing?.isFavorite ?: false,
+                                replayGainTrackDb = parsed.replayGainTrackDb,
+                                replayGainAlbumDb = parsed.replayGainAlbumDb,
+                                artworkCachePath = parsed.artworkCachePath,
+                                lyrics = parsed.lyrics?.takeIf { it.isNotBlank() } ?: sidecarLrc
+                            )
+                        )
                     }
                 }
             }
@@ -258,15 +285,31 @@ class MusicLibraryRepository(
             )
             _scanProgress.value = ScanProgress(isScanning = false, scannedCount = foundTracks.size, currentFile = "")
             foundTracks.size
-        } catch (e: Exception) {
+        } catch (e: SecurityException) {
             _scanProgress.value = ScanProgress(
                 isScanning = false,
                 scannedCount = foundTracks.size,
                 currentFile = "",
-                lastError = e.localizedMessage ?: "Failed to scan SAF folder"
+                lastError = "Storage access is needed to open this music folder."
+            )
+            0
+        } catch (_: Exception) {
+            _scanProgress.value = ScanProgress(
+                isScanning = false,
+                scannedCount = foundTracks.size,
+                currentFile = "",
+                lastError = "Unable to read this music folder. Try selecting the folder again."
             )
             0
         }
+    }
+
+    private fun readSmallTextUri(uri: Uri): String? {
+        return runCatching {
+            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                reader.readText().take(65536).takeIf { it.isNotBlank() }
+            }
+        }.getOrNull()
     }
 
     private fun TrackEntity.toDomain() = Track(
@@ -288,13 +331,16 @@ class MusicLibraryRepository(
         bitrateKbps = bitrateKbps,
         channels = channels,
         folderUri = folderUri,
-        folderName = folderName,
+        folderName = folderLabelOrFallback(),
         dateAdded = dateAdded,
         lastPlayedAt = lastPlayedAt,
         playCount = playCount,
         isFavorite = isFavorite,
         replayGainTrackDb = replayGainTrackDb,
         replayGainAlbumDb = replayGainAlbumDb,
-        artworkCachePath = artworkCachePath
+        artworkCachePath = artworkCachePath,
+        lyrics = lyrics
     )
+
+    private fun TrackEntity.folderLabelOrFallback(): String = folderName.ifBlank { "Music Folder" }
 }

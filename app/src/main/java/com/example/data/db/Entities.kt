@@ -35,7 +35,8 @@ data class TrackEntity(
     val isFavorite: Boolean = false,
     val replayGainTrackDb: Float? = null,
     val replayGainAlbumDb: Float? = null,
-    val artworkCachePath: String? = null
+    val artworkCachePath: String? = null,
+    val lyrics: String? = null
 )
 
 @Entity(tableName = "playlists")

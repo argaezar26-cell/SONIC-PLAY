@@ -7,7 +7,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.SonicFlowApp
-import com.example.ui.theme.SonicFlowTheme
 import com.example.ui.viewmodel.SonicFlowViewModel
 
 class MainActivity : ComponentActivity() {
@@ -19,10 +18,8 @@ class MainActivity : ComponentActivity() {
         )
         val appContainer = (application as SonicFlowApplication).container
         setContent {
-            SonicFlowTheme {
-                val vm: SonicFlowViewModel = viewModel(factory = SonicFlowViewModel.Factory(appContainer))
-                SonicFlowApp(viewModel = vm)
-            }
+            val vm: SonicFlowViewModel = viewModel(factory = SonicFlowViewModel.Factory(appContainer))
+            SonicFlowApp(viewModel = vm)
         }
     }
 }
