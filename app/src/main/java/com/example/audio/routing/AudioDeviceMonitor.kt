@@ -100,6 +100,12 @@ class AudioDeviceMonitor(private val context: Context) {
         )
     }
 
+    private fun isUsbAudioDevice(type: Int): Boolean {
+        return type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+            type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+            type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+    }
+
     fun configureBitPerfectMixerIfSupported(preferredSampleRateHz: Int): MixerVerificationStatus {
         val active = _routingState.value.activeDevice ?: return MixerVerificationStatus.UNKNOWN
         if (Build.VERSION.SDK_INT < 34) {
@@ -112,6 +118,9 @@ class AudioDeviceMonitor(private val context: Context) {
 
         val rawDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         val deviceInfo = rawDevices.firstOrNull { it.id == active.id } ?: return MixerVerificationStatus.UNKNOWN
+        if (!isUsbAudioDevice(deviceInfo.type)) {
+            return MixerVerificationStatus.UNSUPPORTED
+        }
         return try {
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -142,6 +151,7 @@ class AudioDeviceMonitor(private val context: Context) {
         if (Build.VERSION.SDK_INT < 34) return
         val active = _routingState.value.activeDevice ?: return
         val deviceInfo = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.id == active.id } ?: return
+        if (!isUsbAudioDevice(deviceInfo.type)) return
         try {
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -171,7 +181,7 @@ class AudioDeviceMonitor(private val context: Context) {
         var bitPerfectSupported = false
         var activeMixerSummary: String? = null
 
-        if (Build.VERSION.SDK_INT >= 34) {
+        if (Build.VERSION.SDK_INT >= 34 && isUsbAudioDevice(info.type)) {
             try {
                 val attrs = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -192,8 +202,6 @@ class AudioDeviceMonitor(private val context: Context) {
                 } else {
                     mixerStatus = if (bitPerfectSupported) {
                         MixerVerificationStatus.COMPATIBLE_NOT_VERIFIED
-                    } else if (category == OutputRouteCategory.EXTERNAL_USB_DAC) {
-                        MixerVerificationStatus.COMPATIBLE_NOT_VERIFIED
                     } else {
                         MixerVerificationStatus.UNSUPPORTED
                     }
@@ -201,6 +209,8 @@ class AudioDeviceMonitor(private val context: Context) {
             } catch (_: Exception) {
                 mixerStatus = MixerVerificationStatus.UNKNOWN
             }
+        } else if (Build.VERSION.SDK_INT >= 34) {
+            mixerStatus = MixerVerificationStatus.UNSUPPORTED
         } else {
             mixerStatus = if (rates.isNotEmpty() || encodings.isNotEmpty()) {
                 MixerVerificationStatus.COMPATIBLE_NOT_VERIFIED
