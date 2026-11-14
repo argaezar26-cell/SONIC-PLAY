@@ -1,0 +1,6 @@
+{
+  "name": "SONICFLOW",
+  "description": "Premium Hi-Res Lossless Audio Player & Parametric DSP Engine for Android",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

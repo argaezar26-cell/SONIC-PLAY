@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">SONICFLOW</string>
+    <string name="notification_channel_name">SONICFLOW Playback</string>
+    <string name="notification_channel_desc">High-resolution background audio playback controls</string>
+</resources>
